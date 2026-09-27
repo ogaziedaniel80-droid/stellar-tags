@@ -78,6 +78,8 @@ const {
   USER_DATABASE,
 } = require("./src/utils");
 const { getCachedApprovedOrigins } = require("./src/originCache");
+const { createHttpServer, describeTlsStatus } = require("./src/config/tls");
+const { requireMutualTls, serviceIdentity } = require("./src/middleware/mtls");
 
 dotenv.config();
 
@@ -106,11 +108,22 @@ const swaggerOptions = {
   apis: ["./server.js", "./src/routes/v1/*.js"],
 };
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// #31 ΓÇö Attach a correlation ID to every request before anything else runs so
+// #31 — Attach a correlation ID to every request before anything else runs so
 // all downstream middleware, handlers and logs can reference the same trace.
 app.use(correlationId);
+
+// #736 — Mutual TLS. `serviceIdentity` names the calling service from its
+// client certificate so request logs and audit trails can attribute internal
+// traffic, and `requireMutualTls` rejects anything that arrived without one.
+// Both are no-ops while MTLS_ENABLED is false, and the /api-docs mount is
+// deliberately below them so no route is reachable on an internal listener
+// without a certificate.
+app.use(serviceIdentity);
+app.use(requireMutualTls);
+
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 app.use(pinoHttp({ logger, autoLogging: false })); // Use autoLogging: false if you want custom logs, or true if you want everything. PR says "Logs incoming HTTP requests", so let's enable it (default is true).
 app.disable("x-powered-by");
 app.use(securityMiddleware);
@@ -1247,8 +1260,29 @@ if (require.main === module) {
   } = require("./src/migrate-check");
 
   const startServer = () => {
-    const server = app.listen(PORT, "0.0.0.0", () => {
+    // createHttpServer returns an https listener that demands a client
+    // certificate when mTLS is enabled, and a plain http listener otherwise.
+    let server;
+    try {
+      server = createHttpServer(app);
+    } catch (err) {
+      // Refuse to start rather than silently serving in clear when the
+      // certificate material is unusable.
+      logger.error({ err: err.message }, "[mtls] Refusing to start: invalid TLS configuration.");
+      process.exit(1);
+    }
+    const tlsStatus = describeTlsStatus();
+
+    server.listen(PORT, "0.0.0.0", () => {
       logger.info(`Server successfully initialized on port ${PORT}`);
+      logger.info(
+        { tls: tlsStatus },
+        `Transport: ${tlsStatus.transport.toUpperCase()}${
+          tlsStatus.clientCertificateRequired
+            ? " with mandatory client certificates"
+            : ""
+        }`,
+      );
     });
 
     server.on("error", (e) => {
@@ -1296,4 +1330,10 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, gracefulShutdown, rejectNestedObjects, validateMemo };
+module.exports = {
+  app,
+  createHttpServer,
+  gracefulShutdown,
+  rejectNestedObjects,
+  validateMemo,
+};

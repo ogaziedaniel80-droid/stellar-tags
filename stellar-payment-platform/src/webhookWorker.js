@@ -3,6 +3,7 @@ const { Queue, Worker } = require('bullmq');
 const { createRedisConnection, withRedisRetry } = require('./config/redis');
 const { logger } = require('./logger');
 const { shouldFallbackToLocalRegistry } = require('./utils');
+const { internalFetch } = require('./utils/internalClient');
 
 const WEBHOOK_TIMEOUT_MS = 10_000;
 const WEBHOOK_QUEUE_NAME = 'webhook-deliveries';
@@ -97,7 +98,10 @@ const sendWebhook = async (url, payload, secret) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    // internalFetch is a pass-through to `fetch` for merchant endpoints on the
+  // public internet, and presents this service's client certificate when a
+  // webhook points at another internal service.
+  const response = await internalFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

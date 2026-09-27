@@ -56,8 +56,8 @@ ENV NODE_ENV=production
 # Run as the unprivileged `node` user that ships with the base image
 # (smaller attack surface). /app stays writable for the logs/data dirs the
 # app creates at runtime.
-RUN mkdir -p /app/logs /app/data \
-	&& chown node:node /app /app/logs /app/data
+RUN mkdir -p /app/logs /app/data /app/certs \
+	&& chown node:node /app /app/logs /app/data /app/certs
 
 # Production node_modules only (pruned + slimmed in the builder), plus the
 # runtime application files. Tests, docs, logs and build artifacts never
@@ -68,6 +68,9 @@ COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node \
 	/app/server.js /app/horizonListener.js /app/prismaClient.js \
 	/app/mount-versioning.js /app/startup.sh ./
+# Only the health probe from scripts/: it has to follow the server onto https
+# when mTLS is enabled, which a bare wget cannot do (#736).
+COPY --from=builder --chown=node:node /app/scripts/healthcheck.js ./scripts/healthcheck.js
 COPY --from=builder --chown=node:node /app/src ./src
 COPY --from=builder --chown=node:node /app/middleware ./middleware
 COPY --from=builder --chown=node:node /app/config ./config
@@ -75,10 +78,12 @@ COPY --from=builder --chown=node:node /app/config ./config
 USER node
 RUN chmod +x startup.sh
 
-# curl is intentionally NOT installed; busybox wget ships with alpine and
-# keeps the image slim.
+# curl is intentionally NOT installed. The probe is a node one-liner instead of
+# busybox wget because it has to present a client certificate when the listener
+# is behind mTLS.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-	CMD wget -qO- http://127.0.0.1:${PORT:-5000}/health || exit 1
+	CMD node scripts/healthcheck.js || exit 1
 
+ENV MTLS_CERT_DIR=/app/certs
 EXPOSE 5000
 CMD ["./startup.sh"]

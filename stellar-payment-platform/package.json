@@ -21,6 +21,12 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "postinstall": "prisma generate",
+    "pki:init": "sh scripts/pki/pki.sh init",
+    "pki:rotate": "sh scripts/pki/pki.sh rotate",
+    "pki:rotate:ca": "sh scripts/pki/pki.sh rotate --new-intermediate",
+    "pki:prune": "sh scripts/pki/pki.sh prune",
+    "pki:check": "sh scripts/pki/pki.sh check",
+    "healthcheck": "node scripts/healthcheck.js",
     "contract:build": "node ../scripts/deploy.js build",
     "contract:deploy": "node ../scripts/deploy.js deploy",
     "contract:upgrade": "node ../scripts/deploy.js upgrade"

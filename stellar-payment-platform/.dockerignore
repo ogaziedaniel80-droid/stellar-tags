@@ -2,3 +2,8 @@ node_modules
 data
 .env
 *.db
+
+# Internal PKI material (#736): the root CA key is copied into the api-test
+# image by `COPY . .` unless it is excluded here. Certificates are mounted as a
+# volume at runtime instead.
+certs

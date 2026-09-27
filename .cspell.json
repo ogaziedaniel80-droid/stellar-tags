@@ -83,6 +83,9 @@
     "postgresql",
     "gitignore",
     "monorepo",
-    "repo"
+    "repo",
+    "libc",
+    "noout",
+    "keyid"
   ]
 }

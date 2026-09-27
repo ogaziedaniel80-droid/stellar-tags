@@ -31,3 +31,9 @@ docs
 tmp_server.js
 artillery.yml
 docker-compose.yml
+
+# Internal PKI material (#736) — private keys must never enter a build context.
+# Certificates are mounted as a volume or a secret at runtime instead.
+**/certs
+**/*.pem
+**/*.key

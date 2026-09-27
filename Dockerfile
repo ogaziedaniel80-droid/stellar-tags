@@ -33,8 +33,10 @@ ENV NODE_ENV=production
 
 # Runtime write targets (LOG_DIR and the sqlite fallback DB) are created up
 # front and owned by the unprivileged `node` user that ships with the image.
-RUN mkdir -p /app/logs /app/data \
-	&& chown node:node /app/logs /app/data
+# /app/certs is the mount point for internal PKI material when mTLS is enabled
+# (see docker-compose.yml); certificates arrive as a volume, never as a layer.
+RUN mkdir -p /app/logs /app/data /app/certs \
+	&& chown node:node /app/logs /app/data /app/certs
 
 # Production-only dependency tree, Prisma client already generated above.
 # `--chown` avoids a later `chown -R`, which would copy every node_modules file
@@ -45,6 +47,7 @@ COPY --from=backend-deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node stellar-payment-platform/ ./
 
 USER node
+ENV MTLS_CERT_DIR=/app/certs
 EXPOSE 5000
 CMD ["node", "server.js"]
 
@@ -63,4 +66,21 @@ RUN npm run build
 FROM nginx:alpine AS frontend
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+
+# --- Frontend serve, proxying to the API over mTLS (#736) --------------------
+# Same static build; the only difference is the proxy configuration, which
+# presents the edge service certificate and verifies the API's. The placeholders
+# are substituted from the environment when the container starts, so the
+# defaults below are what run if nothing is overridden.
+FROM nginx:alpine AS frontend-mtls
+ENV MTLS_CA_BUNDLE=ca-bundle.crt \
+	MTLS_EDGE_CERT=services/edge.crt \
+	MTLS_EDGE_KEY=services/edge.key \
+	MTLS_BACKEND_NAME=backend \
+	MTLS_BACKEND_PORT=5000
+# Only ${MTLS_*} placeholders are substituted; $host, $uri and friends stay.
+ENV NGINX_ENVSUBST_FILTER=MTLS_
+COPY --from=frontend-build /app/dist /usr/share/nginx/html
+COPY nginx-mtls.conf /etc/nginx/templates/default.conf.template
 EXPOSE 80
